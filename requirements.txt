@@ -1,0 +1,10 @@
+streamlit>=1.22
+pandas
+beautifulsoup4
+selenium
+undetected-chromedriver
+pdfplumber
+pillow
+numpy
+langdetect
+requests
