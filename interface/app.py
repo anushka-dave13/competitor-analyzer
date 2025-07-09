@@ -1,3 +1,4 @@
+# interface/app.py
 import sys
 import os
 
@@ -7,15 +8,15 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import streamlit as st
 from extractor.crawl.core import crawl_website
 from analyzer.analyze import analyze_text
-
 import pandas as pd
 import re
 import tempfile
 
-# Fix for distutils removed in Python 3.13+
+# Monkey patch for Python 3.13+ to support undetected_chromedriver
 try:
     import distutils.version
 except ModuleNotFoundError:
+    import sys
     import types
     from packaging.version import Version
 
@@ -25,50 +26,35 @@ except ModuleNotFoundError:
     sys.modules["distutils"] = distutils
     sys.modules["distutils.version"] = distutils.version
 
-
 def is_valid_url(url):
-    pattern = re.compile(
-        r'^(https?://)'                    # http:// or https://
-        r'(([A-Za-z0-9-]+\.)+[A-Za-z]{2,6})'  # domain
-        r'(:\d+)?'                         # optional port
-        r'(/.*)?$'                         # optional path
-    )
+    pattern = re.compile(r'^(https?://)([\w.-]+)(:[0-9]+)?(/.*)?$')
     return bool(pattern.match(url.strip()))
-
 
 def sanitize_filename(filename):
     return re.sub(r'[^A-Za-z0-9_.-]', '_', filename)
-
 
 def log_error(msg):
     with tempfile.NamedTemporaryFile(delete=False, mode='a', suffix='.log', prefix='streamlit_app_', dir=tempfile.gettempdir()) as f:
         f.write(msg + '\n')
 
-
 st.set_page_config(page_title="Competitor Analyzer", layout="wide")
 st.title("Competitor Analysis Tool")
 
-# --- Sidebar ---
 st.sidebar.header("Navigation")
 section = st.sidebar.radio("Choose Section:", ["Extractor", "Analyzer", "Config Editor"])
 
-# --- Extraction Section ---
+# --- Extraction ---
 if section == "Extractor":
     st.subheader("Website Text Extractor")
-
     url = st.text_input("Enter website URL:")
+
     if st.button("Extract Text"):
         if not url or not is_valid_url(url):
             st.warning("Please enter a valid URL (starting with http:// or https://).")
         else:
             with st.spinner("Extracting content..."):
                 try:
-                    results = crawl_website(
-                        url,
-                        max_pages=20,
-                        save_text=False,
-                        show_progress=False
-                    )
+                    results = crawl_website(url, max_pages=20, save_text=False, show_progress=False)
                     extracted_text = "\n\n".join(results.values()) if results else ""
 
                     if extracted_text.strip():
@@ -81,7 +67,7 @@ if section == "Extractor":
                     log_error(f"[Extractor] URL: {url} | Error: {str(e)}")
                     st.error(f"Failed to extract text from the URL. Error: {e}")
 
-# --- Analyzer Section ---
+# --- Analyzer ---
 elif section == "Analyzer":
     st.subheader("Content Analyzer")
     uploaded_file = st.file_uploader("Upload a .txt file for analysis", type=["txt"])
@@ -121,7 +107,6 @@ elif section == "Analyzer":
                         try:
                             df = pd.DataFrame([results])
                             st.dataframe(df)
-
                             csv = df.to_csv(index=False).encode("utf-8")
                             st.download_button("Download Results as CSV", data=csv, file_name="analysis_result.csv")
                         except Exception as e:
@@ -133,7 +118,7 @@ elif section == "Analyzer":
             log_error(f"[Analyzer] File upload error: {str(e)}")
             st.error("Unexpected error during file upload or analysis.")
 
-# --- Config Editor Section ---
+# --- Config Editor ---
 elif section == "Config Editor":
     from analyzer.utils.config_utils import load_config, save_config
 
@@ -152,7 +137,6 @@ elif section == "Config Editor":
         })
 
     df = pd.DataFrame(table_data)
-
     edited_df = st.data_editor(
         df,
         column_config={
@@ -163,7 +147,6 @@ elif section == "Config Editor":
     )
 
     st.markdown("### Scoring Formula")
-
     formula_parts = [
         f"{row['Include']}{{{row['Bucket']}}}"
         for _, row in edited_df.iterrows()
@@ -187,21 +170,16 @@ elif section == "Config Editor":
 
     if st.button("Save Configuration"):
         new_config = {}
-
         for _, row in edited_df.iterrows():
             bucket = row["Bucket"]
             keywords = [k.strip() for k in row["Keywords"].split(",") if k.strip()]
             weight = row["Weight"]
-            new_config[bucket] = {
-                "keywords": keywords,
-                "weight": weight
-            }
+            new_config[bucket] = {"keywords": keywords, "weight": weight}
 
         new_config["_formula"] = formula_input
         new_config["_custom_variables"] = updated_vars
-
         save_config(new_config)
         st.success("Configuration saved successfully.")
 
 st.markdown("---")
-st.caption("Robust Streamlit Competitor Analyzer © 2025")
+st.caption("Competitor_Analyzer_Anushka© 2025")
