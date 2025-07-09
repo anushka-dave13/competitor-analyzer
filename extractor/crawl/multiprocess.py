@@ -1,4 +1,5 @@
 # extractor/crawl/multiprocess.py
+import patch_distutils  # Must be before undetected_chromedriver
 import logging
 import multiprocessing
 from multiprocessing import Pool
