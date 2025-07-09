@@ -8,3 +8,5 @@ pillow
 numpy
 langdetect
 requests
+tqdm
+
