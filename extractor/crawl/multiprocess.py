@@ -35,9 +35,13 @@ def extract_texts_from_urls(
     max_scrolls=15,
     min_content_length=400,
     lang="en",
-    save_screenshot_on_fail=False
+    save_screenshot_on_fail=False,
+    max_workers=None  # <-- Added support here
 ):
-    logger.info("[MULTIPROCESS] Launching extraction with %d workers", multiprocessing.cpu_count())
+    if max_workers is None:
+        max_workers = min(len(urls), multiprocessing.cpu_count())
+    logger.info("[MULTIPROCESS] Launching extraction with %d workers", max_workers)
+
     args = [
         (url, {
             "headless": headless,
@@ -53,7 +57,7 @@ def extract_texts_from_urls(
     ]
 
     try:
-        with Pool(processes=min(len(urls), multiprocessing.cpu_count()), initializer=init_worker) as pool:
+        with Pool(processes=max_workers, initializer=init_worker) as pool:
             results = list(tqdm(pool.imap(_safe_extract_url, args), total=len(args)))
         return dict(results)
     except Exception as e:
