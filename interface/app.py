@@ -1,32 +1,30 @@
-# interface/app.py
-import patch_distutils  # Must be before undetected_chromedriver
 import sys
 import os
+import re
+import tempfile
+import pandas as pd
+import streamlit as st
 
 # Ensure the root project directory is in sys.path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import streamlit as st
-from extractor.crawl.core import crawl_website
-from analyzer.analyze import analyze_text
-import pandas as pd
-import re
-import tempfile
-
-# Monkey patch for Python 3.13+ to support undetected_chromedriver
+# Patch for Python 3.13: distutils removal workaround for uc
 try:
     import distutils.version
 except ModuleNotFoundError:
-    import sys
     import types
     from packaging.version import Version
-
     distutils = types.ModuleType("distutils")
     distutils.version = types.ModuleType("distutils.version")
     distutils.version.LooseVersion = Version
     sys.modules["distutils"] = distutils
     sys.modules["distutils.version"] = distutils.version
 
+from extractor.crawl.core import crawl_website
+from analyzer.analyze import analyze_text
+from analyzer.utils.config_utils import load_config, save_config
+
+# ---------- Utilities ----------
 def is_valid_url(url):
     pattern = re.compile(r'^(https?://)([\w.-]+)(:[0-9]+)?(/.*)?$')
     return bool(pattern.match(url.strip()))
@@ -38,13 +36,14 @@ def log_error(msg):
     with tempfile.NamedTemporaryFile(delete=False, mode='a', suffix='.log', prefix='streamlit_app_', dir=tempfile.gettempdir()) as f:
         f.write(msg + '\n')
 
+# ---------- Streamlit UI ----------
 st.set_page_config(page_title="Competitor Analyzer", layout="wide")
 st.title("Competitor Analysis Tool")
 
 st.sidebar.header("Navigation")
 section = st.sidebar.radio("Choose Section:", ["Extractor", "Analyzer", "Config Editor"])
 
-# --- Extraction ---
+# ---------- Extractor ----------
 if section == "Extractor":
     st.subheader("Website Text Extractor")
     url = st.text_input("Enter website URL:")
@@ -55,9 +54,16 @@ if section == "Extractor":
         else:
             with st.spinner("Extracting content..."):
                 try:
-                    results = crawl_website(url, max_pages=20, save_text=False, show_progress=False)
+                    results = crawl_website(
+                        base_url=url,
+                        max_pages=20,
+                        save_text=False,
+                        show_progress=False,
+                        save_screenshot_on_fail=True,
+                        lang="en",
+                        min_content_length=400
+                    )
                     extracted_text = "\n\n".join(results.values()) if results else ""
-
                     if extracted_text.strip():
                         filename = sanitize_filename(url.replace('https://', '').replace('http://', '').replace('/', '_')) + ".txt"
                         st.success(f"Extraction complete. Filename: `{filename}`")
@@ -68,7 +74,7 @@ if section == "Extractor":
                     log_error(f"[Extractor] URL: {url} | Error: {str(e)}")
                     st.error(f"Failed to extract text from the URL. Error: {e}")
 
-# --- Analyzer ---
+# ---------- Analyzer ----------
 elif section == "Analyzer":
     st.subheader("Content Analyzer")
     uploaded_file = st.file_uploader("Upload a .txt file for analysis", type=["txt"])
@@ -119,10 +125,8 @@ elif section == "Analyzer":
             log_error(f"[Analyzer] File upload error: {str(e)}")
             st.error("Unexpected error during file upload or analysis.")
 
-# --- Config Editor ---
+# ---------- Config Editor ----------
 elif section == "Config Editor":
-    from analyzer.utils.config_utils import load_config, save_config
-
     st.subheader("Keyword Buckets and Scoring Configuration")
 
     config = load_config()
@@ -154,7 +158,6 @@ elif section == "Config Editor":
         if row["Include"] in ["+", "-"]
     ]
     auto_formula = " ".join(formula_parts)
-
     formula_input = st.text_input("Edit formula manually if needed", value=auto_formula)
 
     st.markdown("### Custom Variables")
@@ -183,4 +186,4 @@ elif section == "Config Editor":
         st.success("Configuration saved successfully.")
 
 st.markdown("---")
-st.caption("Competitor_Analyzer_Anushka© 2025")
+st.caption("Competitor_Analyzer_Anushka © 2025")
