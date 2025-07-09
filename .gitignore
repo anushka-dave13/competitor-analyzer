@@ -1,0 +1,39 @@
+# 🐍 Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# 🧪 Jupyter/IPython junk (if any)
+.ipynb_checkpoints/
+
+# 🗂️ Output and logs
+output/
+*.log
+*.csv
+*.txt
+
+# 📸 Temporary files from OCR/image/pdf extraction
+temp_*.*
+*.png
+*.jpg
+*.jpeg
+*.bmp
+*.pdf
+
+# 🔒 Sensitive files (if added later)
+.env
+
+# ⚙️ VS Code settings (if using)
+.vscode/
+
+# 🍏 macOS junk
+.DS_Store
+
+# 📦 Virtual environments (if you use one)
+venv/
+env/
+
+# 📚 Installer folders
+*.egg-info/
+dist/
+build/

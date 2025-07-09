@@ -1,0 +1,18 @@
+{
+  "AI": {
+    "keywords": ["AI", "GPT", "machine learning", "automation"],
+    "weight": 2.0
+  },
+  "Enablement": {
+    "keywords": ["training", "onboarding", "coaching", "certification"],
+    "weight": 1.5
+  },
+  "Security": {
+    "keywords": ["SSO", "encryption", "SOC2", "compliance"],
+    "weight": 1.2
+  },
+  "_formula": "+{AI} +{Enablement} -{Security}",
+  "_custom_variables": {
+    "bonus": 5
+  }
+}
