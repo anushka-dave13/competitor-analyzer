@@ -1,5 +1,5 @@
 # extractor/crawl/text_extractor.py
-
+import patch_distutils  # Must be before undetected_chromedriver
 import os
 import logging
 import traceback
