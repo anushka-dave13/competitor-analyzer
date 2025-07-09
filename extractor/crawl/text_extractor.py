@@ -1,18 +1,15 @@
-# extractor/crawl/text_extractor.py
-import patch_distutils  # Must be before undetected_chromedriver
+
 import os
+import time
 import logging
 import traceback
-from urllib.parse import urlparse
-import time
-
-import undetected_chromedriver as uc
-from selenium.webdriver.common.by import By
-from selenium.common.exceptions import TimeoutException, WebDriverException
 from langdetect import detect
-
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+import undetected_chromedriver as uc
 import pdfplumber
 import requests
+
 from extractor.extractors.cookie_handler import handle_cookie_consent
 
 logger = logging.getLogger(__name__)
@@ -21,33 +18,35 @@ logging.basicConfig(level=logging.INFO)
 def is_pdf_url(url):
     return url.lower().endswith(".pdf")
 
-def extract_text_from_pdf_url(url):
+def extract_text_from_pdf(url):
     try:
-        response = requests.get(url, timeout=15)
-        if response.ok:
-            with open("temp_download.pdf", "wb") as f:
-                f.write(response.content)
-            with pdfplumber.open("temp_download.pdf") as pdf:
-                text = "\n".join(page.extract_text() or "" for page in pdf.pages)
-            os.remove("temp_download.pdf")
-            return url, text
-        else:
-            raise Exception(f"Failed to download PDF: {response.status_code}")
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        with open("temp.pdf", "wb") as f:
+            f.write(response.content)
+        with pdfplumber.open("temp.pdf") as pdf:
+            text = "\n".join(page.extract_text() or "" for page in pdf.pages)
+        os.remove("temp.pdf")
+        return text
     except Exception as e:
-        logger.warning(f"[PDF_FAIL] {url}: {e}")
-        return url, ""
+        logger.warning(f"[PDF_FAIL] Failed to extract PDF {url}: {e}")
+        return ""
 
-def create_driver(headless=True, proxy=None):
+def init_driver(headless=True, proxy=None):
     options = uc.ChromeOptions()
     if headless:
-        options.add_argument("--headless=new")
+        options.headless = True
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--disable-blink-features=AutomationControlled")
-    options.add_argument("--window-size=1920,1080")
     if proxy:
         options.add_argument(f'--proxy-server={proxy}')
-    return uc.Chrome(options=options)
+
+    try:
+        driver = uc.Chrome(options=options, enable_cdp_events=True)
+        return driver
+    except Exception as e:
+        logger.error(f"[DRIVER_FAIL] Failed to initialize driver: {e}")
+        return None
 
 def extract_text_from_url(
     url,
@@ -62,12 +61,10 @@ def extract_text_from_url(
     cookie_handler=handle_cookie_consent
 ):
     if is_pdf_url(url):
-        return extract_text_from_pdf_url(url)
+        return url, extract_text_from_pdf(url)
 
-    try:
-        driver = create_driver(headless=headless, proxy=proxy)
-    except WebDriverException as e:
-        logger.error(f"[DRIVER_FAIL] Could not create browser instance: {e}")
+    driver = init_driver(headless=headless, proxy=proxy)
+    if not driver:
         return url, ""
 
     try:
@@ -76,47 +73,37 @@ def extract_text_from_url(
         time.sleep(2)
 
         if cookie_handler:
-            cookie_handler(driver)
-
-        scroll_count = 0
-        last_height = driver.execute_script("return document.body.scrollHeight")
-        while scroll_count < max_scrolls:
-            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            time.sleep(scroll_pause)
-            new_height = driver.execute_script("return document.body.scrollHeight")
-            if new_height == last_height:
-                break
-            last_height = new_height
-            scroll_count += 1
+            try:
+                cookie_handler(driver)
+            except Exception as e:
+                logger.warning(f"[COOKIE_FAIL] {url}: {e}")
 
         body = driver.find_element(By.TAG_NAME, "body")
-        text = body.text.strip()
+        for _ in range(max_scrolls):
+            body.send_keys(Keys.END)
+            time.sleep(scroll_pause)
 
-        if len(text) < min_content_length:
-            logger.warning(f"[SKIP] {url} - Too short ({len(text)} chars)")
-            return url, ""
+        text = driver.find_element(By.TAG_NAME, "body").text.strip()
 
-        try:
-            detected_lang = detect(text)
-            if detected_lang != lang:
-                logger.warning(f"[LANG_SKIP] {url} - Detected: {detected_lang}")
-                return url, ""
-        except Exception:
-            logger.warning(f"[LANG_FAIL] Could not detect language for {url}")
+        if not text or len(text) < min_content_length:
+            raise ValueError(f"Extracted text too short or empty: {len(text)} characters")
+
+        detected_lang = detect(text)
+        if lang and detected_lang != lang:
+            raise ValueError(f"Non-target language: {detected_lang}")
 
         return url, text
 
     except Exception as e:
-        logger.error(f"[SCRAPE_FAIL] {url}: {e}")
         if save_screenshot_on_fail:
-            domain = urlparse(url).netloc
-            fname = f"screenshot_{domain.replace('.', '_')}.png"
-            driver.save_screenshot(fname)
-            logger.info(f"[SCREENSHOT] Saved on failure: {fname}")
+            screenshot_name = f"screenshot_fail_{url.replace('https://','').replace('http://','').replace('/','_')}.png"
+            try:
+                driver.save_screenshot(screenshot_name)
+                logger.warning(f"[SCREENSHOT] Saved: {screenshot_name}")
+            except Exception as sse:
+                logger.warning(f"[SCREENSHOT_FAIL] Could not save screenshot for {url}: {sse}")
+        logger.warning(f"[EXTRACT_FAIL] {url}: {e}")
         traceback.print_exc()
         return url, ""
     finally:
-        try:
-            driver.quit()
-        except Exception:
-            pass
+        driver.quit()
