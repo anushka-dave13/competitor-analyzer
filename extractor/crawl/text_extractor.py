@@ -22,6 +22,25 @@ from langdetect import detect, LangDetectException
 
 from analyzer.utils.pdf_utils import extpdf
 from extractor.extractors.cookie_handler import handle_cookie_consent
+# extractor/crawl/text_extractor.py
+
+import sys
+import types
+
+# Patch for Python 3.13: create fake distutils.version.LooseVersion using packaging.version.Version
+try:
+    import distutils.version
+except ModuleNotFoundError:
+    from packaging.version import Version
+    distutils = types.ModuleType("distutils")
+    distutils.version = types.ModuleType("distutils.version")
+    distutils.version.LooseVersion = Version
+    sys.modules["distutils"] = distutils
+    sys.modules["distutils.version"] = distutils.version
+
+# Now safe to import undetected_chromedriver
+import undetected_chromedriver as uc
+
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
