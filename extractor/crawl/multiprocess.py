@@ -15,7 +15,9 @@ def init_worker():
 def _safe_extract_url(args):
     url, kwargs = args
     try:
-        return url, extract_text_from_url(url, **kwargs)
+        # extract_text_from_url returns (url, text), we want just the text
+        _, text = extract_text_from_url(url, **kwargs)
+        return url, text
     except Exception as e:
         logger.error(f"[WORKER_ERROR] {url}: {e}")
         traceback.print_exc()
