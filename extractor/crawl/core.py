@@ -33,45 +33,82 @@ def crawl_website(
     os.makedirs(output_dir, exist_ok=True)
     
     # Step 1: Link Discovery
-    links, errors = discover_internal_links(
-        start_url=base_url,
-        max_pages=max_pages,
-        max_threads=max_threads,
-        respect_robots=respect_robots
-    )
+    try:
+        links, errors = discover_internal_links(
+            start_url=base_url,
+            max_pages=max_pages,
+            max_threads=max_threads,
+            respect_robots=respect_robots
+        )
+        
+        logger.info(f"[DISCOVERY] Links found: {len(links)}")
+        logger.info(f"[DISCOVERY] Errors: {len(errors)}")
+        
+        # Debug: Print first few links
+        if links:
+            logger.info(f"[DISCOVERY] First few links: {list(links)[:5]}")
+        
+        if errors:
+            logger.warning(f"[DISCOVERY] First few errors: {list(errors)[:3]}")
+        
+    except Exception as e:
+        logger.error(f"[DISCOVERY_ERROR] Failed to discover links: {e}")
+        return {}
     
     if not links:
         logger.warning(f"[EMPTY] No links discovered from {base_url}")
-        return {}
+        # Try to extract from the base URL directly
+        logger.info(f"[FALLBACK] Attempting to extract from base URL directly")
+        links = [base_url]
     
-    logger.info(f"[DISCOVERY] {len(links)} links discovered.")
+    logger.info(f"[DISCOVERY] {len(links)} links to process.")
     
     # Step 2: Text Extraction with Multiprocessing
     # Note: Using the first proxy from proxy_list if available, or None
     proxy = proxy_list[0] if proxy_list and len(proxy_list) > 0 else None
     
-    url_text_map = extract_texts_from_urls(
-        urls=links,
-        max_workers=max_processes,          # This parameter now exists in multiprocess.py
-        proxy=proxy,                        # Fixed: changed from proxy_list to proxy
-        headless=True,
-        show_progress=show_progress,
-        save_screenshot_on_fail=save_screenshot_on_fail,
-        lang=lang,
-        min_content_length=min_content_length,
-        cookie_handler=handle_cookie_consent  # Pass cookie handler
-    )
-    
-    logger.info(f"[EXTRACTION] {len(url_text_map)} pages successfully extracted.")
+    try:
+        url_text_map = extract_texts_from_urls(
+            urls=links,
+            max_workers=max_processes,          # This parameter now exists in multiprocess.py
+            proxy=proxy,                        # Fixed: changed from proxy_list to proxy
+            headless=True,
+            show_progress=show_progress,
+            save_screenshot_on_fail=save_screenshot_on_fail,
+            lang=lang,
+            min_content_length=min_content_length,
+            cookie_handler=handle_cookie_consent  # Pass cookie handler
+        )
+        
+        logger.info(f"[EXTRACTION] {len(url_text_map)} pages successfully extracted.")
+        
+        # Debug: Check what we got
+        successful_extractions = {url: text for url, text in url_text_map.items() if text.strip()}
+        failed_extractions = {url: text for url, text in url_text_map.items() if not text.strip()}
+        
+        logger.info(f"[EXTRACTION] Successful: {len(successful_extractions)}")
+        logger.info(f"[EXTRACTION] Failed: {len(failed_extractions)}")
+        
+        if failed_extractions:
+            logger.warning(f"[EXTRACTION] Failed URLs: {list(failed_extractions.keys())}")
+        
+        # If all extractions failed, log more details
+        if not successful_extractions:
+            logger.error(f"[EXTRACTION] All extractions failed!")
+            logger.error(f"[EXTRACTION] Original links: {links}")
+            logger.error(f"[EXTRACTION] Results: {url_text_map}")
+            
+    except Exception as e:
+        logger.error(f"[EXTRACTION_ERROR] Failed during text extraction: {e}")
+        import traceback
+        traceback.print_exc()
+        return {}
     
     # Step 3: Save Output
-    if save_text:
-        for url, content in url_text_map.items():
+    if save_text and successful_extractions:
+        for url, content in successful_extractions.items():
             try:
                 filename = sanitize_filename(url) + ".txt"
                 path = os.path.join(output_dir, filename)
                 save_text_to_file(content, path)
-            except Exception as e:
-                logger.warning(f"[SAVE_FAIL] Could not save {url}: {e}")
-    
-    return url_text_map
+                logger.info(f"[SAVE]
