@@ -37,6 +37,13 @@ def extract_texts_from_urls(
     show_progress=True,
     max_workers=None  # Add this parameter
 ):
+    logger.info(f"[MULTIPROCESS_START] Processing {len(urls)} URLs")
+    
+    if not urls:
+        logger.warning("[MULTIPROCESS] No URLs provided")
+        return {}
+    
+    # Prepare arguments for each URL
     args = [
         (url, {
             "headless": headless,
@@ -57,10 +64,30 @@ def extract_texts_from_urls(
     else:
         max_workers = min(max_workers, len(urls), multiprocessing.cpu_count())
     
+    logger.info(f"[MULTIPROCESS] Using {max_workers} workers for {len(urls)} URLs")
+    
     try:
+        # For small number of URLs, process sequentially for better debugging
+        if len(urls) <= 2:
+            logger.info("[MULTIPROCESS] Processing sequentially for debugging")
+            results = []
+            for arg in args:
+                result = _safe_extract_url(arg)
+                results.append(result)
+                logger.info(f"[SEQUENTIAL] Processed {result[0]}: {len(result[1])} chars")
+            return dict(results)
+        
+        # Use multiprocessing for larger batches
         with multiprocessing.Pool(processes=max_workers, initializer=init_worker) as pool:
             results = list(tqdm(pool.imap(_safe_extract_url, args), total=len(args), disable=not show_progress))
+        
+        # Log results
+        successful = sum(1 for _, text in results if text.strip())
+        failed = len(results) - successful
+        logger.info(f"[MULTIPROCESS_COMPLETE] {successful} successful, {failed} failed")
+        
         return dict(results)
+        
     except Exception as e:
         logger.error(f"[MULTIPROCESS] Unexpected error: {e}")
         traceback.print_exc()
