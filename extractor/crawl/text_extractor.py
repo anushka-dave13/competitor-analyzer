@@ -33,13 +33,22 @@ def extract_text_from_pdf(url):
 def init_driver(headless=True, proxy=None):
     options = uc.ChromeOptions()
     if headless:
-        options.headless = True
+        options.add_argument("--headless")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--window-size=1920,1080")
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option('useAutomationExtension', False)
+    
     if proxy:
         options.add_argument(f'--proxy-server={proxy}')
+    
     try:
-        driver = uc.Chrome(options=options, enable_cdp_events=True)
+        driver = uc.Chrome(options=options)
+        # Remove webdriver property
+        driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         return driver
     except Exception as e:
         logger.error(f"[DRIVER_FAIL] Failed to initialize driver: {e}")
@@ -57,41 +66,98 @@ def extract_text_from_url(
     save_screenshot_on_fail=False,
     cookie_handler=handle_cookie_consent
 ):
+    logger.info(f"[EXTRACT_START] Processing URL: {url}")
+    
     if is_pdf_url(url):
-        return url, extract_text_from_pdf(url)
+        logger.info(f"[PDF_DETECTED] {url}")
+        pdf_text = extract_text_from_pdf(url)
+        return url, pdf_text
     
     driver = init_driver(headless=headless, proxy=proxy)
     if not driver:
+        logger.error(f"[DRIVER_FAIL] Could not initialize driver for {url}")
         return url, ""
     
     try:
         driver.set_page_load_timeout(timeout)
+        logger.info(f"[LOADING] {url}")
         driver.get(url)
-        time.sleep(2)
+        time.sleep(3)  # Give page time to load
         
+        # Check if page actually loaded
+        current_url = driver.current_url
+        if current_url != url:
+            logger.warning(f"[REDIRECT] {url} -> {current_url}")
+        
+        # Handle cookie consent
         if cookie_handler:
             try:
+                logger.info(f"[COOKIE] Handling consent for {url}")
                 cookie_handler(driver)
             except Exception as e:
                 logger.warning(f"[COOKIE_FAIL] {url}: {e}")
         
-        body = driver.find_element(By.TAG_NAME, "body")
-        for i in range(max_scrolls):  # Fixed: replaced * with i
-            body.send_keys(Keys.END)
-            time.sleep(scroll_pause)
+        # Scroll to load dynamic content
+        try:
+            body = driver.find_element(By.TAG_NAME, "body")
+            logger.info(f"[SCROLL] Scrolling {max_scrolls} times for {url}")
+            for i in range(max_scrolls):
+                body.send_keys(Keys.END)
+                time.sleep(scroll_pause)
+        except Exception as e:
+            logger.warning(f"[SCROLL_FAIL] {url}: {e}")
         
-        text = driver.find_element(By.TAG_NAME, "body").text.strip()
+        # Extract text
+        try:
+            text = driver.find_element(By.TAG_NAME, "body").text.strip()
+            logger.info(f"[TEXT_EXTRACTED] {url}: {len(text)} characters")
+        except Exception as e:
+            logger.error(f"[TEXT_EXTRACT_FAIL] {url}: {e}")
+            text = ""
         
+        # Validate text length
         if not text or len(text) < min_content_length:
-            raise ValueError(f"Extracted text too short or empty: {len(text)} characters")
+            error_msg = f"Extracted text too short or empty: {len(text)} characters (min: {min_content_length})"
+            logger.warning(f"[SHORT_TEXT] {url}: {error_msg}")
+            
+            # Try alternative extraction methods
+            try:
+                # Try getting text from main content areas
+                selectors = ['main', 'article', '.content', '#content', '.post', '.entry']
+                for selector in selectors:
+                    try:
+                        element = driver.find_element(By.CSS_SELECTOR, selector)
+                        alt_text = element.text.strip()
+                        if alt_text and len(alt_text) >= min_content_length:
+                            logger.info(f"[ALT_EXTRACT] {url}: Found text using {selector}: {len(alt_text)} chars")
+                            text = alt_text
+                            break
+                    except:
+                        continue
+            except Exception as e:
+                logger.warning(f"[ALT_EXTRACT_FAIL] {url}: {e}")
+            
+            if not text or len(text) < min_content_length:
+                raise ValueError(error_msg)
         
-        detected_lang = detect(text)
-        if lang and detected_lang != lang:
-            raise ValueError(f"Non-target language: {detected_lang}")
+        # Language detection (make it optional)
+        if lang and text:
+            try:
+                detected_lang = detect(text)
+                if detected_lang != lang:
+                    logger.warning(f"[LANG_MISMATCH] {url}: Expected {lang}, got {detected_lang}")
+                    # Don't fail on language mismatch, just warn
+                    # raise ValueError(f"Non-target language: {detected_lang}")
+            except Exception as e:
+                logger.warning(f"[LANG_DETECT_FAIL] {url}: {e}")
         
+        logger.info(f"[SUCCESS] {url}: Extracted {len(text)} characters")
         return url, text
         
     except Exception as e:
+        error_msg = f"[EXTRACT_FAIL] {url}: {e}"
+        logger.error(error_msg)
+        
         if save_screenshot_on_fail:
             screenshot_name = f"screenshot_fail_{url.replace('https://','').replace('http://','').replace('/','_')}.png"
             try:
@@ -100,8 +166,18 @@ def extract_text_from_url(
             except Exception as sse:
                 logger.warning(f"[SCREENSHOT_FAIL] Could not save screenshot for {url}: {sse}")
         
-        logger.warning(f"[EXTRACT_FAIL] {url}: {e}")
-        traceback.print_exc()
+        # Print more debug info
+        try:
+            page_source_len = len(driver.page_source) if driver.page_source else 0
+            logger.error(f"[DEBUG] {url}: Page source length: {page_source_len}")
+            logger.error(f"[DEBUG] {url}: Current URL: {driver.current_url}")
+            logger.error(f"[DEBUG] {url}: Page title: {driver.title}")
+        except:
+            pass
+        
         return url, ""
     finally:
-        driver.quit()
+        try:
+            driver.quit()
+        except:
+            pass
