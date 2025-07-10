@@ -31,7 +31,7 @@ def crawl_website(
     """
     logger.info(f"[START] Crawling base URL: {base_url}")
     os.makedirs(output_dir, exist_ok=True)
-
+    
     # Step 1: Link Discovery
     links, errors = discover_internal_links(
         start_url=base_url,
@@ -39,17 +39,21 @@ def crawl_website(
         max_threads=max_threads,
         respect_robots=respect_robots
     )
+    
     if not links:
         logger.warning(f"[EMPTY] No links discovered from {base_url}")
         return {}
-
+    
     logger.info(f"[DISCOVERY] {len(links)} links discovered.")
-
+    
     # Step 2: Text Extraction with Multiprocessing
+    # Note: Using the first proxy from proxy_list if available, or None
+    proxy = proxy_list[0] if proxy_list and len(proxy_list) > 0 else None
+    
     url_text_map = extract_texts_from_urls(
         urls=links,
-        max_workers=max_processes,
-        proxy_list=proxy_list,
+        max_workers=max_processes,          # This parameter now exists in multiprocess.py
+        proxy=proxy,                        # Fixed: changed from proxy_list to proxy
         headless=True,
         show_progress=show_progress,
         save_screenshot_on_fail=save_screenshot_on_fail,
@@ -57,9 +61,9 @@ def crawl_website(
         min_content_length=min_content_length,
         cookie_handler=handle_cookie_consent  # Pass cookie handler
     )
-
+    
     logger.info(f"[EXTRACTION] {len(url_text_map)} pages successfully extracted.")
-
+    
     # Step 3: Save Output
     if save_text:
         for url, content in url_text_map.items():
@@ -69,5 +73,5 @@ def crawl_website(
                 save_text_to_file(content, path)
             except Exception as e:
                 logger.warning(f"[SAVE_FAIL] Could not save {url}: {e}")
-
+    
     return url_text_map
