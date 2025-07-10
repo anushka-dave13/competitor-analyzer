@@ -32,7 +32,8 @@ def extract_texts_from_urls(
     lang="en",
     save_screenshot_on_fail=False,
     cookie_handler=None,
-    show_progress=True
+    show_progress=True,
+    max_workers=None  # Add this parameter
 ):
     args = [
         (url, {
@@ -47,9 +48,15 @@ def extract_texts_from_urls(
             "cookie_handler": cookie_handler
         }) for url in urls
     ]
-
+    
+    # Use max_workers if provided, otherwise use the minimum of URLs count and CPU count
+    if max_workers is None:
+        max_workers = min(len(urls), multiprocessing.cpu_count())
+    else:
+        max_workers = min(max_workers, len(urls), multiprocessing.cpu_count())
+    
     try:
-        with multiprocessing.Pool(processes=min(len(urls), multiprocessing.cpu_count()), initializer=init_worker) as pool:
+        with multiprocessing.Pool(processes=max_workers, initializer=init_worker) as pool:
             results = list(tqdm(pool.imap(_safe_extract_url, args), total=len(args), disable=not show_progress))
         return dict(results)
     except Exception as e:
