@@ -29,11 +29,14 @@ def crawl_website(
     2. Extracts rendered + PDF content via Selenium + multiprocessing.
     3. Saves content to disk or returns as a dict.
     """
-    logger.info(f"[START] Crawling base URL: {base_url}")
+    logger.info(f"[CRAWL_START] Base URL: {base_url}")
+    logger.info(f"[CRAWL_CONFIG] max_pages={max_pages}, max_processes={max_processes}, min_content_length={min_content_length}")
+    
     os.makedirs(output_dir, exist_ok=True)
     
     # Step 1: Link Discovery
     try:
+        logger.info(f"[LINK_DISCOVERY] Starting link discovery for {base_url}")
         links, errors = discover_internal_links(
             start_url=base_url,
             max_pages=max_pages,
@@ -41,63 +44,91 @@ def crawl_website(
             respect_robots=respect_robots
         )
         
-        logger.info(f"[DISCOVERY] Links found: {len(links)}")
-        logger.info(f"[DISCOVERY] Errors: {len(errors)}")
+        logger.info(f"[LINK_DISCOVERY] Found {len(links)} links, {len(errors)} errors")
         
         # Debug: Print first few links
         if links:
-            logger.info(f"[DISCOVERY] First few links: {list(links)[:5]}")
+            logger.info(f"[LINK_DISCOVERY] Sample links: {links[:3]}")
         
         if errors:
-            logger.warning(f"[DISCOVERY] First few errors: {list(errors)[:3]}")
+            logger.warning(f"[LINK_DISCOVERY] Sample errors: {errors[:3]}")
         
     except Exception as e:
-        logger.error(f"[DISCOVERY_ERROR] Failed to discover links: {e}")
+        logger.error(f"[LINK_DISCOVERY_ERROR] Failed to discover links: {e}")
+        import traceback
+        traceback.print_exc()
         return {}
     
+    # If no links found, try base URL directly
     if not links:
-        logger.warning(f"[EMPTY] No links discovered from {base_url}")
-        # Try to extract from the base URL directly
-        logger.info(f"[FALLBACK] Attempting to extract from base URL directly")
+        logger.warning(f"[LINK_DISCOVERY] No links found, trying base URL directly")
         links = [base_url]
     
-    logger.info(f"[DISCOVERY] {len(links)} links to process.")
+    logger.info(f"[EXTRACTION_START] Processing {len(links)} URLs")
     
-    # Step 2: Text Extraction with Multiprocessing
-    # Note: Using the first proxy from proxy_list if available, or None
+    # Step 2: Text Extraction
     proxy = proxy_list[0] if proxy_list and len(proxy_list) > 0 else None
+    if proxy:
+        logger.info(f"[EXTRACTION] Using proxy: {proxy}")
     
     try:
         url_text_map = extract_texts_from_urls(
             urls=links,
-            max_workers=max_processes,          # This parameter now exists in multiprocess.py
-            proxy=proxy,                        # Fixed: changed from proxy_list to proxy
+            max_workers=max_processes,
+            proxy=proxy,
             headless=True,
             show_progress=show_progress,
             save_screenshot_on_fail=save_screenshot_on_fail,
             lang=lang,
             min_content_length=min_content_length,
-            cookie_handler=handle_cookie_consent  # Pass cookie handler
+            cookie_handler=handle_cookie_consent
         )
         
-        logger.info(f"[EXTRACTION] {len(url_text_map)} pages successfully extracted.")
-        
-        # Debug: Check what we got
+        # Analyze results
         successful_extractions = {url: text for url, text in url_text_map.items() if text.strip()}
         failed_extractions = {url: text for url, text in url_text_map.items() if not text.strip()}
         
-        logger.info(f"[EXTRACTION] Successful: {len(successful_extractions)}")
-        logger.info(f"[EXTRACTION] Failed: {len(failed_extractions)}")
+        logger.info(f"[EXTRACTION_COMPLETE] {len(successful_extractions)} successful, {len(failed_extractions)} failed")
         
         if failed_extractions:
-            logger.warning(f"[EXTRACTION] Failed URLs: {list(failed_extractions.keys())}")
+            logger.warning(f"[EXTRACTION_FAILED] Failed URLs: {list(failed_extractions.keys())}")
         
-        # If all extractions failed, log more details
+        # Debug successful extractions
+        if successful_extractions:
+            for url, text in successful_extractions.items():
+                logger.info(f"[EXTRACTION_SUCCESS] {url}: {len(text)} characters")
+        
+        # If all extractions failed, provide detailed error info
         if not successful_extractions:
-            logger.error(f"[EXTRACTION] All extractions failed!")
-            logger.error(f"[EXTRACTION] Original links: {links}")
-            logger.error(f"[EXTRACTION] Results: {url_text_map}")
+            logger.error(f"[EXTRACTION_TOTAL_FAIL] All extractions failed!")
+            logger.error(f"[EXTRACTION_TOTAL_FAIL] URLs attempted: {links}")
             
+            # Try a single URL with detailed debugging
+            if links:
+                test_url = links[0]
+                logger.info(f"[DEBUG_EXTRACTION] Testing single URL: {test_url}")
+                
+                # Import directly for debugging
+                from extractor.crawl.text_extractor import extract_text_from_url
+                try:
+                    debug_url, debug_text = extract_text_from_url(
+                        test_url,
+                        headless=False,  # Use non-headless for debugging
+                        save_screenshot_on_fail=True,
+                        min_content_length=min_content_length,
+                        lang=lang
+                    )
+                    logger.info(f"[DEBUG_EXTRACTION] Result: {len(debug_text)} characters")
+                    if debug_text:
+                        successful_extractions[debug_url] = debug_text
+                except Exception as e:
+                    logger.error(f"[DEBUG_EXTRACTION] Failed: {e}")
+                    import traceback
+                    traceback.print_exc()
+        
+        # Use successful extractions for further processing
+        url_text_map = successful_extractions
+        
     except Exception as e:
         logger.error(f"[EXTRACTION_ERROR] Failed during text extraction: {e}")
         import traceback
@@ -105,10 +136,16 @@ def crawl_website(
         return {}
     
     # Step 3: Save Output
-    if save_text and successful_extractions:
-        for url, content in successful_extractions.items():
+    if save_text and url_text_map:
+        logger.info(f"[SAVE_START] Saving {len(url_text_map)} files")
+        for url, content in url_text_map.items():
             try:
                 filename = sanitize_filename(url) + ".txt"
                 path = os.path.join(output_dir, filename)
                 save_text_to_file(content, path)
-                logger.info(f"[SAVE]
+                logger.info(f"[SAVE_SUCCESS] {filename}: {len(content)} characters")
+            except Exception as e:
+                logger.warning(f"[SAVE_FAIL] Could not save {url}: {e}")
+    
+    logger.info(f"[CRAWL_COMPLETE] Returned {len(url_text_map)} extracted texts")
+    return url_text_map
